@@ -4,7 +4,8 @@
 # Purpose:
 #   Produce the JAR-style replication artifacts: sample identifiers and
 #   a file inventory of RAW_DATA_DIR / DATA_DIR / OUTPUT_DIR with mtime,
-#   size, and SHA256 hash for every file.
+#   size, and SHA256 hash for every file. Event identifiers include the
+#   estimated beta and its within-year quartile when available.
 #
 # Inputs (from DATA_DIR):
 #   event-panel.parquet
@@ -70,7 +71,8 @@ output_dir
 panel <- read_parquet(glue("{data_dir}/event-panel.parquet"))
 
 sample_ids <- panel |>
-  distinct(gvkey, permno, rdq, datadate, fyearq) |>
+  distinct(gvkey, permno, rdq, datadate, fyearq,
+           beta, beta_obs, beta_group) |>
   arrange(gvkey, rdq)
 
 # Write into the repo's tracked provenance/ folder so the sample-ids
@@ -87,6 +89,22 @@ write.csv(sample_ids,
 nrow(sample_ids)              # rows
 n_distinct(sample_ids$gvkey)  # distinct gvkeys
 range(sample_ids$rdq)         # rdq range
+
+# Beta coverage is lower than the full event sample because beta requires
+# at least 750 paired daily returns in the five-year pre-announcement window.
+sample_ids |>
+  summarize(events = n(),
+            beta_available = sum(!is.na(beta)),
+            beta_missing = sum(is.na(beta)),
+            pct_with_beta = round(100 * beta_available / events, 1))
+
+# beta_group is 1 (lowest beta) through 4 (highest beta), assigned within
+# announcement year. "Unavailable" events stay in the identifiers file.
+sample_ids |>
+  mutate(beta_group = if_else(is.na(beta_group), "Unavailable",
+                              paste0("Q", beta_group))) |>
+  count(beta_group, name = "announcements") |>
+  arrange(beta_group)
 
 
 # File inventory ---------------------------------------------------------------
