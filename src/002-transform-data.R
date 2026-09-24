@@ -286,6 +286,103 @@ annc_r <- annc_r |>
   filter(event_td - DAYS_BEFORE >= min(trading_dates$td),
          event_td + DAYS_AFTER  <= max(trading_dates$td))
 
+# Step 4b: estimate a pre-announcement beta for each event ---------------------
+
+# Give each announcement a temporary ID so we can identify its beta later.
+annc_r <- annc_r |>
+  mutate(event_id = row_number())
+
+# DuckDB needs access to the event rows and trading-day calendar.
+duckdb::duckdb_register(con, "beta_events", annc_r)
+duckdb::duckdb_register(con, "tdates", trading_dates)
+
+# Use the raw daily files directly. This keeps the large CRSP file in DuckDB.
+dsf_file <- normalizePath(
+  glue("{raw_data_dir}/crsp-dsf-v2.parquet"),
+  winslash = "/",
+  mustWork = TRUE
+)
+
+index_file <- normalizePath(
+  glue("{raw_data_dir}/crsp-index.parquet"),
+  winslash = "/",
+  mustWork = TRUE
+)
+
+beta_sql <- glue("
+  WITH return_pairs AS (
+    SELECT
+      e.event_id,
+      CAST(m.dlytotret AS DOUBLE) AS market_return,
+      CAST(s.dlyret AS DOUBLE) AS stock_return
+    FROM beta_events AS e
+    JOIN tdates AS cutoff
+      ON cutoff.td = e.event_td - 21
+    JOIN read_parquet('{dsf_file}') AS s
+      ON s.permno = e.permno
+     AND s.dlycaldt >= e.event_date - INTERVAL '5 years'
+     AND s.dlycaldt <= cutoff.date
+    JOIN read_parquet('{index_file}') AS m
+      ON m.dlycaldt = s.dlycaldt
+    WHERE s.dlyret IS NOT NULL
+      AND m.dlytotret IS NOT NULL
+  )
+  SELECT
+    event_id,
+    COUNT(*) AS beta_obs,
+    (
+      SUM(market_return * stock_return)
+      - SUM(market_return) * SUM(stock_return) / COUNT(*)
+    ) / NULLIF(
+      SUM(market_return * market_return)
+      - SUM(market_return) * SUM(market_return) / COUNT(*),
+      0
+    ) AS beta
+  FROM return_pairs
+  GROUP BY event_id
+  HAVING COUNT(*) >= 750
+")
+
+tictoc::tic("Estimating pre-announcement betas")
+beta_by_event <- DBI::dbGetQuery(con, beta_sql) |>
+  as_tibble()
+tictoc::toc()
+
+message(
+  "Events with an estimable beta: ",
+  format(nrow(beta_by_event), big.mark = ",")
+)
+
+# Attach the estimated beta to its announcement.
+# Events without enough historical returns keep NA and remain in the main sample.
+annc_r <- annc_r |>
+  left_join(
+    beta_by_event |>
+      select(event_id, beta_obs, beta),
+    by = "event_id"
+  )
+
+message(
+  "Events matched to a beta: ",
+  format(sum(!is.na(annc_r$beta)), big.mark = ","),
+  " of ",
+  format(nrow(annc_r), big.mark = ",")
+)
+
+# Assign beta quartiles within each announcement year.
+# Group announcements before expanding each event into 41 trading-day rows.
+beta_groups <- annc_r |>
+  filter(!is.na(beta)) |>
+  mutate(announcement_year = lubridate::year(event_date)) |>
+  group_by(announcement_year) |>
+  mutate(beta_group = ntile(beta, 4L)) |>
+  ungroup() |>
+  select(event_id, beta_group)
+
+annc_r <- annc_r |>
+  left_join(beta_groups, by = "event_id")
+
+
 sample_selection <- add_step(sample_selection, 5,
                              glue("Complete [-{DAYS_BEFORE}, +{DAYS_AFTER}] window available"),
                              nrow(annc_r))
@@ -299,7 +396,6 @@ sample_selection <- add_step(sample_selection, 5,
 duckdb::duckdb_register(con, "events", annc_r)
 events_tbl <- tbl(con, "events")
 
-duckdb::duckdb_register(con, "tdates", trading_dates)
 tdates_tbl <- tbl(con, "tdates")
 
 # Daily stock data, tagged with the trading-day index and with the market
@@ -326,7 +422,7 @@ panel <- events_tbl |>
          td <= event_td + DAYS_AFTER) |>
   mutate(relative_td = td - event_td) |>
   select(gvkey, permno, datadate, fyearq, rdq, event_td, event_date,
-         date, relative_td, ret, ret_mkt, vol, prc, shrout)
+         date, relative_td, ret, ret_mkt, vol, prc, shrout, beta, beta_obs, beta_group)
 
 # Step 6: build the Beaver measures --------------------------------------------
 
@@ -447,6 +543,18 @@ decade_summary <- panel |>
   collect() |>
   arrange(decade, relative_td)
 
+beta_summary <- panel |>
+  filter(!is.na(beta_group)) |>
+  group_by(relative_td, beta_group) |>
+  summarize(
+    obs          = n(),
+    mad_ret_mkt  = mean(abs(ret_mkt), na.rm = TRUE),
+    mean_rel_vol = mean(rel_vol, na.rm = TRUE),
+    med_turn     = median(turn, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  collect() |>
+  arrange(beta_group, relative_td)
 
 # Step 8: write everything out -------------------------------------------------
 
@@ -462,6 +570,7 @@ tictoc::toc()
 
 write_parquet(event_summary,  glue("{data_dir}/event-summary.parquet"))
 write_parquet(decade_summary, glue("{data_dir}/decade-summary.parquet"))
+write_parquet(beta_summary, glue("{data_dir}/beta-summary.parquet"))
 write_parquet(sample_selection, glue("{data_dir}/sample-selection.parquet"))
 
 print(sample_selection)
