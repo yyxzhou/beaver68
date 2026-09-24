@@ -2,8 +2,8 @@
 # 003-figures.R
 #
 # Purpose:
-#   Reproduce Beaver's (1968) two headline figures on modern data, plus a
-#   by-decade version that asks whether his findings still hold.
+#   Reproduce Beaver's (1968) two headline figures on modern data, plus
+#   comparisons by decade and by estimated market beta.
 #
 #   Beaver's paper made its argument almost entirely through PLOTS -- which
 #   is unusual by modern standards and is itself one of the discussion
@@ -20,6 +20,7 @@
 # Inputs (from DATA_DIR):
 #   event-summary.parquet    relative_td x year
 #   decade-summary.parquet   relative_td x decade
+#   beta-summary.parquet     relative_td x beta quartile
 #
 # Outputs (to OUTPUT_DIR), each written as BOTH .pdf and .png:
 #   fig1-volume.{pdf,png}            Beaver Fig. 1 analogue: relative volume
@@ -27,6 +28,8 @@
 #   fig3-turnover-by-decade.{pdf,png} Median turnover, by decade
 #   fig4-variability-by-decade.{pdf,png} Return dispersion, by decade
 #   fig5-observations.{pdf,png}       Sanity check: obs per relative day
+#   fig6-turnover-by-beta.{pdf,png}   Median turnover, by beta quartile
+#   fig7-variability-by-beta.{pdf,png} Return dispersion, by beta quartile
 #
 #   Use the .pdf files if you are writing in LaTeX (vector, scales
 #   cleanly). Use the .png files if you are writing in Word.
@@ -55,11 +58,12 @@ dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 
 event_summary  <- read_parquet(glue("{data_dir}/event-summary.parquet"))
 decade_summary <- read_parquet(glue("{data_dir}/decade-summary.parquet"))
+beta_summary   <- read_parquet(glue("{data_dir}/beta-summary.parquet"))
 
 
 # A shared look for every figure ------------------------------------------------
 
-# Defining this once means all five figures are visually consistent, and
+# Defining this once means all figures are visually consistent, and
 # changing the look is a one-line edit rather than five.
 
 theme_beaver <- theme_minimal(base_size = 11) +
@@ -258,6 +262,61 @@ fig5 <- event_summary |>
   theme_beaver
 
 save_fig(fig5, "fig5-observations")
+
+
+# Figures 6 and 7: results by beta quartile ------------------------------------
+
+# Beta groups are formed within each announcement year in script 002.
+# Q1 contains the lowest-beta announcements; Q4 contains the highest.
+# A company's group can change over time as its estimated beta changes.
+
+beta_group_labels <- c("Q1: Lowest beta", "Q2", "Q3", "Q4: Highest beta")
+
+beta_plot_data <- beta_summary |>
+  mutate(beta_group = factor(beta_group,
+                             levels = 1:4,
+                             labels = beta_group_labels))
+
+# Figure 6: turnover by beta quartile -------------------------------------------
+
+fig6 <- beta_plot_data |>
+  ggplot(aes(x = relative_td, y = med_turn,
+             colour = beta_group, group = beta_group)) +
+  annc_line +
+  geom_line(linewidth = 0.7) +
+  scale_x_continuous(breaks = seq(-20, 20, 5)) +
+  scale_y_continuous(labels = label_percent(accuracy = 0.01)) +
+  scale_colour_viridis_d(option = "D", end = 0.9, drop = FALSE) +
+  labs(title = "Median share turnover around annual earnings announcements",
+       subtitle = "By within-year beta quartile",
+       x = "Trading days relative to earnings announcement",
+       y = "Median daily turnover",
+       caption = cap(paste("Beta is estimated from the prior five years of daily returns.",
+                           "Quartiles are formed separately within each announcement year."))) +
+  theme_beaver
+
+save_fig(fig6, "fig6-turnover-by-beta")
+
+
+# Figure 7: return variability by beta quartile -------------------------------
+
+fig7 <- beta_plot_data |>
+  ggplot(aes(x = relative_td, y = mad_ret_mkt,
+             colour = beta_group, group = beta_group)) +
+  annc_line +
+  geom_line(linewidth = 0.7) +
+  scale_x_continuous(breaks = seq(-20, 20, 5)) +
+  scale_y_continuous(labels = label_percent(accuracy = 0.1)) +
+  scale_colour_viridis_d(option = "D", end = 0.9, drop = FALSE) +
+  labs(title = "Return variability around annual earnings announcements",
+       subtitle = "By within-year beta quartile",
+       x = "Trading days relative to earnings announcement",
+       y = "Mean absolute market-adjusted return",
+       caption = cap(paste("Beta is estimated from the prior five years of daily returns.",
+                           "Quartiles are formed separately within each announcement year."))) +
+  theme_beaver
+
+save_fig(fig7, "fig7-variability-by-beta")
 
 
 cat("\nFigures written to", output_dir, "\n")
