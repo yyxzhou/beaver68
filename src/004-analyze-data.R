@@ -28,6 +28,7 @@
 #   main-results-returns.tex     Return-variability results  (LaTeX)
 #   main-results-turnover.tex    Volume results              (LaTeX)
 #   by-decade.tex                Day-0 effect by decade      (LaTeX)
+#   by-beta-quartile.tex         Day-0 effect by beta group  (LaTeX)
 #   tables.docx                  All tables + figures        (Word)
 #
 #   Everything is produced in BOTH LaTeX and Word from a single set of
@@ -95,10 +96,13 @@ sample_selection <- read_parquet(glue("{data_dir}/sample-selection.parquet"))
 
 regdata <- panel |>
   select(gvkey, datadate, date, relative_td, ret_mkt, turn, rel_vol,
-         year, decade) |>
+         year, decade, beta_group) |>
   mutate(abs_ret_mkt  = abs(ret_mkt),
          event_day    = as.integer(relative_td == 0L),
          event_window = as.integer(abs(relative_td) <= 1L),
+         beta_group   = factor(beta_group, levels = 1:4,
+                               labels = c("Q1 (Lowest beta)", "Q2", "Q3",
+                                          "Q4 (Highest beta)")),
          # One fixed effect per announcement: the formal version of
          # Beaver's "each firm is its own control."
          firm_event   = paste(gvkey, datadate)) |>
@@ -192,7 +196,7 @@ save_tt(tt_desc, glue("{output_dir}/descriptives.tex"), overwrite = TRUE)
 # WHY lean AND mem.clean. By default a fitted fixest object keeps several
 # vectors as long as the input data -- residuals, fitted values, the
 # demeaned regressors. At 3.4 million rows that is a few hundred MB PER
-# MODEL, and we fit eight of them. Without these two arguments R runs out
+# MODEL, and we fit ten of them. Without these two arguments R runs out
 # of memory and dies with a segmentation fault and no error message,
 # which is a genuinely awful thing to debug.
 #
@@ -308,6 +312,44 @@ ft_decade <- modelsummary(decade_models,
                           output      = "flextable")
 
 
+# Table 6: announcement-day effect by beta quartile -----------------------------
+
+# beta_group is constant within each announcement event. The no-intercept
+# interaction estimates one day-0 effect for each quartile, relative to the
+# other days in events in that same quartile. Missing-beta events are omitted
+# automatically from these models; they remain in the main and decade models.
+
+m_beta_ret  <- fit(abs_ret_mkt ~ 0 + event_day:beta_group | firm_event)
+m_beta_turn <- fit(turn ~ 0 + event_day:beta_group | firm_event)
+
+beta_models <- list("Abs. abn. return" = m_beta_ret,
+                    "Turnover"         = m_beta_turn)
+
+beta_rename <- \(x) str_replace(x, "event_day:beta_group", "Day 0 x ")
+
+beta_table_note <- paste(
+  "Each coefficient is the announcement-day effect for that beta quartile,",
+  "relative to other days in the same event window. Quartiles are formed",
+  "within announcement year. Standard errors are clustered by firm and date."
+)
+
+modelsummary(beta_models,
+             stars       = STARS,
+             gof_omit    = GOF_OMIT,
+             fmt         = 4,
+             title       = "Announcement-day effect by beta quartile",
+             coef_rename = beta_rename,
+             notes       = beta_table_note,
+             output      = glue("{output_dir}/by-beta-quartile.tex"))
+
+ft_beta <- modelsummary(beta_models,
+                        stars       = STARS,
+                        gof_omit    = GOF_OMIT,
+                        fmt         = 4,
+                        coef_rename = beta_rename,
+                        output      = "flextable")
+
+
 # Assemble the Word document ----------------------------------------------------
 
 # officer builds a .docx containing every table and figure, so a student
@@ -339,6 +381,10 @@ doc <- read_docx() |>
   body_add_flextable(autofit(ft_decade)) |>
   body_add_break() |>
 
+  body_add_par("Table 6: By beta quartile", style = "heading 2") |>
+  body_add_flextable(autofit(ft_beta)) |>
+  body_add_break() |>
+
   body_add_par("Figure 1: Trading volume", style = "heading 2") |>
   body_add_img(fig_png("fig1-volume"), width = 6, height = 3.86) |>
 
@@ -351,11 +397,19 @@ doc <- read_docx() |>
   body_add_par("Figure 4: Return variability by decade", style = "heading 2") |>
   body_add_img(fig_png("fig4-variability-by-decade"), width = 6, height = 3.86)
 
+doc <- doc |>
+  body_add_par("Figure 5: Turnover by beta quartile", style = "heading 2") |>
+  body_add_img(fig_png("fig6-turnover-by-beta"), width = 6, height = 3.86) |>
+
+  body_add_par("Figure 6: Return variability by beta quartile", style = "heading 2") |>
+  body_add_img(fig_png("fig7-variability-by-beta"), width = 6, height = 3.86)
+
 print(doc, target = glue("{output_dir}/tables.docx"))
 
 
 cat("\nTables written to", output_dir, "\n")
 cat("  LaTeX: sample-selection.tex, descriptives.tex,\n")
-cat("         main-results-returns.tex, main-results-turnover.tex, by-decade.tex\n")
+cat("         main-results-returns.tex, main-results-turnover.tex,\n")
+cat("         by-decade.tex, by-beta-quartile.tex\n")
 cat("  Word:  tables.docx (all tables + figures in one file)\n")
 cat("Next: src/005-data-provenance.R\n")
