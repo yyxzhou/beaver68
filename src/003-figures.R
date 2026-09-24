@@ -28,8 +28,10 @@
 #   fig3-turnover-by-decade.{pdf,png} Median turnover, by decade
 #   fig4-variability-by-decade.{pdf,png} Return dispersion, by decade
 #   fig5-observations.{pdf,png}       Sanity check: obs per relative day
-#   fig6-turnover-by-beta.{pdf,png}   Median turnover, by beta quartile
-#   fig7-variability-by-beta.{pdf,png} Return dispersion, by beta quartile
+#   fig6-my-partition-turnover.{pdf,png}       Median turnover for the write-up slot
+#   fig7-my-partition-variability.{pdf,png}       Return dispersion by beta quartile
+#   fig6-my-partition.{pdf,png}       Template alias for the beta-turnover figure
+#   fig7-my-partition.{pdf,png}       Template alias for beta return variability
 #
 #   Use the .pdf files if you are writing in LaTeX (vector, scales
 #   cleanly). Use the .png files if you are writing in Word.
@@ -295,7 +297,8 @@ fig6 <- beta_plot_data |>
                            "Quartiles are formed separately within each announcement year."))) +
   theme_beaver
 
-save_fig(fig6, "fig6-turnover-by-beta")
+save_fig(fig6, "fig6-my-partition-turnover")
+save_fig(fig6, "fig6-my-partition")
 
 
 # Figure 7: return variability by beta quartile -------------------------------
@@ -316,7 +319,8 @@ fig7 <- beta_plot_data |>
                            "Quartiles are formed separately within each announcement year."))) +
   theme_beaver
 
-save_fig(fig7, "fig7-variability-by-beta")
+save_fig(fig7, "fig7-my-partition-variability")
+save_fig(fig7, "fig7-my-partition")
 
 
 cat("\nFigures written to", output_dir, "\n")

@@ -28,7 +28,7 @@
 #   main-results-returns.tex     Return-variability results  (LaTeX)
 #   main-results-turnover.tex    Volume results              (LaTeX)
 #   by-decade.tex                Day-0 effect by decade      (LaTeX)
-#   by-beta-quartile.tex         Day-0 effect by beta group  (LaTeX)
+#   my-partition.tex             Day-0 effect by beta group  (LaTeX)
 #   tables.docx                  All tables + figures        (Word)
 #
 #   Everything is produced in BOTH LaTeX and Word from a single set of
@@ -340,7 +340,7 @@ modelsummary(beta_models,
              title       = "Announcement-day effect by beta quartile",
              coef_rename = beta_rename,
              notes       = beta_table_note,
-             output      = glue("{output_dir}/by-beta-quartile.tex"))
+             output      = glue("{output_dir}/my-partition.tex"))
 
 ft_beta <- modelsummary(beta_models,
                         stars       = STARS,
@@ -398,11 +398,11 @@ doc <- read_docx() |>
   body_add_img(fig_png("fig4-variability-by-decade"), width = 6, height = 3.86)
 
 doc <- doc |>
-  body_add_par("Figure 5: Turnover by beta quartile", style = "heading 2") |>
-  body_add_img(fig_png("fig6-turnover-by-beta"), width = 6, height = 3.86) |>
+  body_add_par("Figure 6: Turnover by beta quartile", style = "heading 2") |>
+  body_add_img(fig_png("fig6-my-partition"), width = 6, height = 3.86) |>
 
-  body_add_par("Figure 6: Return variability by beta quartile", style = "heading 2") |>
-  body_add_img(fig_png("fig7-variability-by-beta"), width = 6, height = 3.86)
+  body_add_par("Figure 7: Return variability by beta quartile", style = "heading 2") |>
+  body_add_img(fig_png("fig7-my-partition"), width = 6, height = 3.86)
 
 print(doc, target = glue("{output_dir}/tables.docx"))
 
@@ -410,6 +410,6 @@ print(doc, target = glue("{output_dir}/tables.docx"))
 cat("\nTables written to", output_dir, "\n")
 cat("  LaTeX: sample-selection.tex, descriptives.tex,\n")
 cat("         main-results-returns.tex, main-results-turnover.tex,\n")
-cat("         by-decade.tex, by-beta-quartile.tex\n")
+cat("         by-decade.tex, my-partition.tex\n")
 cat("  Word:  tables.docx (all tables + figures in one file)\n")
 cat("Next: src/005-data-provenance.R\n")

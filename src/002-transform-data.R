@@ -353,14 +353,23 @@ message(
   format(nrow(beta_by_event), big.mark = ",")
 )
 
-# Attach the estimated beta to its announcement.
-# Events without enough historical returns keep NA and remain in the main sample.
+# Register the event-level estimates so DuckDB can assign quartiles before
+# each announcement is expanded into its 41 trading-day observations.
+duckdb::duckdb_register(con, "beta_estimates", beta_by_event)
+
+beta_groups <- tbl(con, "beta_events") |>
+  inner_join(tbl(con, "beta_estimates"), by = "event_id") |>
+  mutate(announcement_year = lubridate::year(event_date)) |>
+  group_by(announcement_year) |>
+  mutate(beta_group = ntile(beta, 4L)) |>
+  ungroup() |>
+  select(event_id, beta, beta_obs, beta_group) |>
+  collect()
+
+# Events without enough historical returns remain in the main sample with
+# missing beta fields; only beta-group analyses exclude them.
 annc_r <- annc_r |>
-  left_join(
-    beta_by_event |>
-      select(event_id, beta_obs, beta),
-    by = "event_id"
-  )
+  left_join(beta_groups, by = "event_id")
 
 message(
   "Events matched to a beta: ",
@@ -368,20 +377,6 @@ message(
   " of ",
   format(nrow(annc_r), big.mark = ",")
 )
-
-# Assign beta quartiles within each announcement year.
-# Group announcements before expanding each event into 41 trading-day rows.
-beta_groups <- annc_r |>
-  filter(!is.na(beta)) |>
-  mutate(announcement_year = lubridate::year(event_date)) |>
-  group_by(announcement_year) |>
-  mutate(beta_group = ntile(beta, 4L)) |>
-  ungroup() |>
-  select(event_id, beta_group)
-
-annc_r <- annc_r |>
-  left_join(beta_groups, by = "event_id")
-
 
 sample_selection <- add_step(sample_selection, 5,
                              glue("Complete [-{DAYS_BEFORE}, +{DAYS_AFTER}] window available"),
